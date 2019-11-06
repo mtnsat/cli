@@ -43,6 +43,7 @@ namespace detail
 inline void split(std::vector<std::string>& strs, const std::string& input)
 {
     enum class State { space, word, sentence };
+    char sentenceStartChar;
     State state = State::space;
 
     strs.clear();
@@ -56,8 +57,9 @@ inline void split(std::vector<std::string>& strs, const std::string& input)
                 {
                     // do nothing
                 }
-                else if (c == '"')
+                else if (c == '"' || c == '\'')
                 {
+                    sentenceStartChar = c;
                     state = State::sentence;
                     strs.push_back("");
                 }
@@ -72,8 +74,9 @@ inline void split(std::vector<std::string>& strs, const std::string& input)
                 {
                     state = State::space;
                 }
-                else if (c == '"')
+                else if (c == '"' || c == '\'')
                 {
+                    sentenceStartChar = c;
                     state = State::sentence;
                     strs.push_back("");
                 }
@@ -84,7 +87,7 @@ inline void split(std::vector<std::string>& strs, const std::string& input)
                 }
                 break;
             case State::sentence:
-                if (c == '"')
+                if (c == sentenceStartChar)
                 {
                     state = State::space;
                 }
