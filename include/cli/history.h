@@ -54,13 +54,15 @@ public:
         if (mode == Mode::browsing)
         {
             assert(!buffer.empty());
-            buffer[current] = item;
+            if (buffer.size() > 1 && buffer[1] == item) // try to insert an element identical to last one
+                buffer.pop_front();
+            else // the item was not identical
+                buffer[current] = item;
         }
         else // Mode::inserting
         {
-            buffer.push_front(item);
-            if (buffer.size() > maxSize)
-                buffer.pop_back();
+            if (buffer.empty() || buffer[0] != item) // insert an element not equal to last one
+                Insert(item);
         }
         mode = Mode::inserting;
     }
@@ -74,8 +76,7 @@ public:
     {
         if (mode == Mode::inserting)
         {
-            buffer.push_front(line);
-            if (buffer.size() > maxSize) buffer.pop_back();
+            Insert(line);
             mode = Mode::browsing;
             current = (buffer.size() > 1) ? 1 : 0;
         }
@@ -94,10 +95,10 @@ public:
     // Return the next item of the history, updating the current item.
     std::string Next()
     {
-        if (buffer.empty())
+        if (buffer.empty() || current == 0)
             return {};
-        if (current != 0)
-            --current;
+        assert(current != 0);
+        --current;
         assert(current < buffer.size());
         return buffer[current];
     }
@@ -112,6 +113,13 @@ public:
     }
 
 private:
+
+    void Insert(const std::string& item)
+    {
+        buffer.push_front(item);
+        if (buffer.size() > maxSize)
+            buffer.pop_back();
+    }
 
     const std::size_t maxSize;
     std::deque<std::string> buffer;
