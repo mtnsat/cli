@@ -27,8 +27,8 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_WINKEYBOARD_H_
-#define CLI_WINKEYBOARD_H_
+#ifndef CLI_DETAIL_WINKEYBOARD_H_
+#define CLI_DETAIL_WINKEYBOARD_H_
 
 #include <functional>
 #include <string>
@@ -43,11 +43,13 @@
 
 namespace cli
 {
+namespace detail
+{
 
 class WinKeyboard : public InputDevice
 {
 public:
-    explicit WinKeyboard(detail::asio::BoostExecutor ex) :
+    explicit WinKeyboard(asio::BoostExecutor ex) :
         InputDevice(ex)
     {
         servant = std::make_unique<std::thread>([this]() { Read(); });
@@ -73,6 +75,13 @@ private:
         int c = _getch();
         switch (c)
         {
+            case EOF:
+            case 4:  // EOT ie CTRL-D
+            case 26: // CTRL-Z
+            case 3:  // CTRL-C
+                return std::make_pair(KeyType::eof, ' ');
+                break;
+
             case 224: // symbol
             {
                 c = _getch();
@@ -120,6 +129,7 @@ private:
     std::unique_ptr<std::thread> servant;
 };
 
-} // namespace
+} // namespace detail
+} // namespace cli
 
-#endif // CLI_WINKEYBOARD_H_
+#endif // CLI_DETAIL_WINKEYBOARD_H_

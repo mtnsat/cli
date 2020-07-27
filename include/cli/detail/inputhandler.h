@@ -27,17 +27,19 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_INPUTHANDLER_H_
-#define CLI_INPUTHANDLER_H_
+#ifndef CLI_DETAIL_INPUTHANDLER_H_
+#define CLI_DETAIL_INPUTHANDLER_H_
 
 #include <functional>
 #include <string>
 #include "terminal.h"
 #include "inputdevice.h"
-#include "cli.h" // CliSession
+#include "../cli.h" // CliSession
 #include "commonprefix.h"
 
 namespace cli
+{
+namespace detail
 {
 
 class InputHandler
@@ -64,6 +66,11 @@ private:
         {
             case Symbol::nothing:
             {
+                break;
+            }
+            case Symbol::eof:
+            {
+                session.Exit();
                 break;
             }
             case Symbol::command:
@@ -96,7 +103,7 @@ private:
                     break;
                 }
 
-                auto commonPrefix = detail::CommonPrefix(completions);
+                auto commonPrefix = CommonPrefix(completions);
                 if (commonPrefix.size() > line.size())
                 {
                     terminal.SetLine(commonPrefix);
@@ -119,7 +126,8 @@ private:
     Terminal terminal;
 };
 
+} // namespace detail
 } // namespace cli
 
-#endif // CLI_INPUTHANDLER_H_
+#endif // CLI_DETAIL_INPUTHANDLER_H_
 

@@ -27,14 +27,16 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_SERVER_H_
-#define CLI_SERVER_H_
+#ifndef CLI_DETAIL_SERVER_H_
+#define CLI_DETAIL_SERVER_H_
 
 #include <memory>
 #include <queue>
 #include "boostasio.h"
 
 namespace cli
+{
+namespace detail
 {
 
 class Session : public std::enable_shared_from_this<Session>, public std::streambuf
@@ -49,7 +51,7 @@ public:
 
 protected:
 
-    Session( boost::asio::ip::tcp::socket socket ) : socket( std::move( socket ) ), outStream( this ) {}
+    Session(boost::asio::ip::tcp::socket _socket) : socket(std::move(_socket)), outStream( this ) {}
 
     virtual void Disconnect()
     {
@@ -90,9 +92,9 @@ protected:
     virtual void OnConnect() = 0;
     virtual void OnDisconnect() = 0;
     virtual void OnError() = 0;
-    virtual void OnDataReceived( const std::string& data ) = 0;
+    virtual void OnDataReceived(const std::string& _data) = 0;
 
-    virtual std::string Encode(const std::string& data) const { return data; }
+    virtual std::string Encode(const std::string& _data) const { return _data; }
 
 private:
 
@@ -122,14 +124,14 @@ public:
     Server( const Server& ) = delete;
     Server& operator = ( const Server& ) = delete;
 
-    Server(detail::asio::BoostExecutor::ContextType& ios, short port) :
-        acceptor( ios, boost::asio::ip::tcp::endpoint( boost::asio::ip::tcp::v4(), port ) ),
+    Server(asio::BoostExecutor::ContextType& ios, unsigned short port) :
+        acceptor( ios, boost::asio::ip::tcp::endpoint( boost::asio::ip::tcp::v4(), port )),
         socket( ios )
     {
         Accept();
     }
-    Server(detail::asio::BoostExecutor::ContextType& ios, std::string address, short port) :
-        acceptor( ios, boost::asio::ip::tcp::endpoint(detail::asio::IpAddressFromString(address), port ) ),
+    Server(asio::BoostExecutor::ContextType& ios, std::string address, unsigned short port) :
+        acceptor( ios, boost::asio::ip::tcp::endpoint(asio::IpAddressFromString(address), port)),
         socket( ios )
     {
         Accept();
@@ -150,7 +152,8 @@ private:
     boost::asio::ip::tcp::socket socket;
 };
 
+} // namespace detail
 } // namespace cli
 
-#endif // CLI_SERVER_H_
+#endif // CLI_DETAIL_SERVER_H_
 

@@ -27,50 +27,46 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_COLORPROFILE_H_
-#define CLI_COLORPROFILE_H_
+#ifndef CLI_DETAIL_INPUTDEVICE_H_
+#define CLI_DETAIL_INPUTDEVICE_H_
 
-#include "detail/rang.h"
+#include <functional>
+#include <string>
+#include "boostasio.h"
 
 namespace cli
 {
-
-inline bool& Color() { static bool color; return color; }
-
-inline void SetColor() { Color() = true; }
-inline void SetNoColor() { Color() = false; }
-
-enum BeforePrompt { beforePrompt };
-enum AfterPrompt { afterPrompt };
-enum BeforeInput { beforeInput };
-enum AfterInput { afterInput };
-
-inline std::ostream& operator<<(std::ostream& os, BeforePrompt)
+namespace detail
 {
-    if ( Color() ) { os << rang::control::forceColor << rang::fg::green << rang::style::bold; }
-    return os;
-}
 
-inline std::ostream& operator<<(std::ostream& os, AfterPrompt)
+enum class KeyType { ascii, up, down, left, right, backspace, canc, home, end, ret, eof, ignored };
+
+class InputDevice
 {
-    os << rang::style::reset;
-    return os;
-}
+public:
+    using Handler = std::function< void( std::pair<KeyType,char> ) >;
 
-inline std::ostream& operator<<(std::ostream& os, BeforeInput)
-{
-    if ( Color() ) { os << rang::control::forceColor << rang::fgB::gray; }
-    return os;
-}
+    InputDevice(asio::BoostExecutor ex) : executor(ex) {}
+    virtual ~InputDevice() = default;
 
-inline std::ostream& operator<<(std::ostream& os, AfterInput)
-{
-    os << rang::style::reset;
-    return os;
-}
+    template <typename H>
+    void Register(H&& h) { handler = std::forward<H>(h); }
 
+protected:
+
+    void Notify(std::pair<KeyType,char> k)
+    {
+        executor.Post([this,k](){ if (handler) handler(k); });
+    }
+
+private:
+
+    asio::BoostExecutor executor;
+    Handler handler;
+};
+
+} // namespace detail
 } // namespace cli
 
-#endif // CLI_COLORPROFILE_H_
-
+#endif // CLI_DETAIL_INPUTDEVICE_H_
 

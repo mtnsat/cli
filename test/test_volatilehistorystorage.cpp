@@ -1,6 +1,6 @@
 /*******************************************************************************
  * CLI - A simple command line interface.
- * Copyright (C) 2016 Daniele Pallastrelli
+ * Copyright (C) 2020 Daniele Pallastrelli
  *
  * Boost Software License - Version 1.0 - August 17th, 2003
  *
@@ -27,50 +27,33 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_COLORPROFILE_H_
-#define CLI_COLORPROFILE_H_
+#include <boost/test/unit_test.hpp>
+#include "cli/volatilehistorystorage.h"
 
-#include "detail/rang.h"
+using namespace cli;
 
-namespace cli
+BOOST_AUTO_TEST_SUITE(VolatileHistoryStorageSuite)
+
+BOOST_AUTO_TEST_CASE(Basics)
 {
+    VolatileHistoryStorage s(10);
 
-inline bool& Color() { static bool color; return color; }
+    // starts empty
+    BOOST_CHECK(s.Commands().empty());
 
-inline void SetColor() { Color() = true; }
-inline void SetNoColor() { Color() = false; }
+    const std::vector<std::string> v = { "item1", "item2", "item3", "item4", "item5", "item6" };
+    s.Store(v);
+    auto result = s.Commands();
+    BOOST_CHECK_EQUAL_COLLECTIONS(v.begin(), v.end(), result.begin(), result.end());
 
-enum BeforePrompt { beforePrompt };
-enum AfterPrompt { afterPrompt };
-enum BeforeInput { beforeInput };
-enum AfterInput { afterInput };
+    const std::vector<std::string> v2 = { "itemA", "itemB", "itemC", "itemD", "itemE", "itemF" };
+    s.Store(v2);
+    result = s.Commands();
+    const std::vector<std::string> expected = { "item3", "item4", "item5", "item6", "itemA", "itemB", "itemC", "itemD", "itemE", "itemF" };
+    BOOST_CHECK_EQUAL_COLLECTIONS(expected.begin(), expected.end(), result.begin(), result.end());
 
-inline std::ostream& operator<<(std::ostream& os, BeforePrompt)
-{
-    if ( Color() ) { os << rang::control::forceColor << rang::fg::green << rang::style::bold; }
-    return os;
+    s.Clear();
+    BOOST_CHECK(s.Commands().empty()); // check clear
 }
 
-inline std::ostream& operator<<(std::ostream& os, AfterPrompt)
-{
-    os << rang::style::reset;
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, BeforeInput)
-{
-    if ( Color() ) { os << rang::control::forceColor << rang::fgB::gray; }
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, AfterInput)
-{
-    os << rang::style::reset;
-    return os;
-}
-
-} // namespace cli
-
-#endif // CLI_COLORPROFILE_H_
-
-
+BOOST_AUTO_TEST_SUITE_END()

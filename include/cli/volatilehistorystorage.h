@@ -1,6 +1,6 @@
 /*******************************************************************************
  * CLI - A simple command line interface.
- * Copyright (C) 2016 Daniele Pallastrelli
+ * Copyright (C) 2020 Daniele Pallastrelli
  *
  * Boost Software License - Version 1.0 - August 17th, 2003
  *
@@ -27,43 +27,42 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_INPUTDEVICE_H_
-#define CLI_INPUTDEVICE_H_
+#ifndef CLI_VOLATILEHISTORYSTORAGE_H_
+#define CLI_VOLATILEHISTORYSTORAGE_H_
 
-#include <functional>
-#include <string>
-#include "boostasio.h"
+#include "historystorage.h"
+#include <deque>
 
 namespace cli
 {
 
-enum class KeyType { ascii, up, down, left, right, backspace, canc, home, end, ret, ignored };
-
-class InputDevice
+class VolatileHistoryStorage : public HistoryStorage
 {
-public:
-    using Handler = std::function< void( std::pair<KeyType,char> ) >;
-
-    InputDevice(detail::asio::BoostExecutor ex) : executor(ex) {}
-    virtual ~InputDevice() = default;
-
-    template <typename H>
-    void Register(H&& h) { handler = std::forward<H>(h); }
-
-protected:
-
-    void Notify(std::pair<KeyType,char> k)
-    {
-        executor.Post([this,k](){ if (handler) handler(k); });
-    }
-
-private:
-
-    detail::asio::BoostExecutor executor;
-    Handler handler;
+    public:
+        explicit VolatileHistoryStorage(std::size_t size = 1000) : maxSize(size) {}
+        void Store(const std::vector<std::string>& cmds) override
+        {
+            using dt = std::deque<std::string>::difference_type;
+            commands.insert(commands.end(), cmds.begin(), cmds.end());
+            if (commands.size() > maxSize)
+                commands.erase(
+                    commands.begin(),
+                    commands.begin()+static_cast<dt>(commands.size()-maxSize)
+                );
+        }
+        std::vector<std::string> Commands() const override
+        {
+            return std::vector<std::string>(commands.begin(), commands.end());
+        }
+        void Clear() override
+        {
+            commands.clear();
+        }
+    private:
+        const std::size_t maxSize;
+        std::deque<std::string> commands;
 };
 
 } // namespace cli
 
-#endif // CLI_INPUTDEVICE_H_
-
+#endif // CLI_VOLATILEHISTORYSTORAGE_H_

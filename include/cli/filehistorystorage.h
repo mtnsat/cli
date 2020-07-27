@@ -1,6 +1,6 @@
 /*******************************************************************************
  * CLI - A simple command line interface.
- * Copyright (C) 2016 Daniele Pallastrelli
+ * Copyright (C) 2020 Daniele Pallastrelli
  *
  * Boost Software License - Version 1.0 - August 17th, 2003
  *
@@ -27,50 +27,59 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_COLORPROFILE_H_
-#define CLI_COLORPROFILE_H_
+#ifndef CLI_FILEHISTORYSTORAGE_H_
+#define CLI_FILEHISTORYSTORAGE_H_
 
-#include "detail/rang.h"
+#include "historystorage.h"
+#include <fstream>
 
 namespace cli
 {
 
-inline bool& Color() { static bool color; return color; }
-
-inline void SetColor() { Color() = true; }
-inline void SetNoColor() { Color() = false; }
-
-enum BeforePrompt { beforePrompt };
-enum AfterPrompt { afterPrompt };
-enum BeforeInput { beforeInput };
-enum AfterInput { afterInput };
-
-inline std::ostream& operator<<(std::ostream& os, BeforePrompt)
+class FileHistoryStorage : public HistoryStorage
 {
-    if ( Color() ) { os << rang::control::forceColor << rang::fg::green << rang::style::bold; }
-    return os;
-}
+public:
+    FileHistoryStorage(const std::string& _fileName, std::size_t size = 1000) : 
+        maxSize(size),
+        fileName(_fileName)
+    {
+    }
+    void Store(const std::vector<std::string>& cmds) override
+    {
+        using dt = std::vector<std::string>::difference_type;
+        auto commands = Commands();
+        commands.insert(commands.end(), cmds.begin(), cmds.end());
+        if (commands.size() > maxSize)
+            commands.erase(
+                commands.begin(), 
+                commands.begin() + static_cast<dt>(commands.size() - maxSize)
+            );
+        std::ofstream f(fileName, std::ios_base::out);
+            for (const auto& line: commands)
+                f << line << '\n';
+    }
+    std::vector<std::string> Commands() const override
+    {
+        std::vector<std::string> commands;
+        std::ifstream in(fileName);
+        if (in)
+        {
+            std::string line;
+            while (std::getline(in, line))
+                commands.push_back(line);
+        }
+        return commands;
+    }
+    void Clear() override
+    {
+        std::ofstream f(fileName, std::ios_base::out | std::ios_base::trunc);
+    }
 
-inline std::ostream& operator<<(std::ostream& os, AfterPrompt)
-{
-    os << rang::style::reset;
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, BeforeInput)
-{
-    if ( Color() ) { os << rang::control::forceColor << rang::fgB::gray; }
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, AfterInput)
-{
-    os << rang::style::reset;
-    return os;
-}
+private:
+    const std::size_t maxSize;
+    const std::string fileName;
+};
 
 } // namespace cli
 
-#endif // CLI_COLORPROFILE_H_
-
-
+#endif // CLI_FILEHISTORYSTORAGE_H_

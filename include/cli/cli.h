@@ -35,29 +35,35 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <algorithm>
 #include <cctype> // std::isspace
 #include <type_traits>
-#include <boost/lexical_cast.hpp>
 #include "colorprofile.h"
-#include "history.h"
-#include "split.h"
+#include "detail/history.h"
+#include "detail/split.h"
+#include "detail/fromstring.h"
+#include "historystorage.h"
+#include "volatilehistorystorage.h"
 
-#define CLI_DEPRECATED_API
+// #define CLI_DEPRECATED_API
 
 namespace cli
 {
 
     // ********************************************************************
 
-    template < typename T > struct TypeDesc {};
+    template < typename T > struct TypeDesc { static const char* Name() { return ""; } };
     template <> struct TypeDesc< char > { static const char* Name() { return "<char>"; } };
     template <> struct TypeDesc< unsigned char > { static const char* Name() { return "<unsigned char>"; } };
+    template <> struct TypeDesc< signed char > { static const char* Name() { return "<signed char>"; } };
     template <> struct TypeDesc< short > { static const char* Name() { return "<short>"; } };
     template <> struct TypeDesc< unsigned short > { static const char* Name() { return "<unsigned short>"; } };
     template <> struct TypeDesc< int > { static const char* Name() { return "<int>"; } };
     template <> struct TypeDesc< unsigned int > { static const char* Name() { return "<unsigned int>"; } };
     template <> struct TypeDesc< long > { static const char* Name() { return "<long>"; } };
     template <> struct TypeDesc< unsigned long > { static const char* Name() { return "<unsigned long>"; } };
+    template <> struct TypeDesc< long long > { static const char* Name() { return "<long long>"; } };
+    template <> struct TypeDesc< unsigned long long > { static const char* Name() { return "<unsigned long long>"; } };
     template <> struct TypeDesc< float > { static const char* Name() { return "<float>"; } };
     template <> struct TypeDesc< double > { static const char* Name() { return "<double>"; } };
     template <> struct TypeDesc< long double > { static const char* Name() { return "<long double>"; } };
@@ -118,10 +124,17 @@ namespace cli
     public:
         Cli(
             std::unique_ptr<Menu>&& _rootMenu,
-            std::function< void(std::ostream&)> _exitAction = std::function< void(std::ostream&) >()
+            std::function< void(std::ostream&)> _exitAction = {},
+            std::unique_ptr<HistoryStorage>&& historyStorage = std::make_unique<VolatileHistoryStorage>()
         ) :
+            globalHistoryStorage(std::move(historyStorage)),
             rootMenu(std::move(_rootMenu)),
             exitAction(_exitAction)
+        {
+        }
+
+        Cli(std::unique_ptr<Menu> _rootMenu, std::unique_ptr<HistoryStorage> historyStorage) :
+            Cli(std::move(_rootMenu), {}, std::move(historyStorage))
         {
         }
 
@@ -130,8 +143,23 @@ namespace cli
         Cli& operator = (const Cli&) = delete;
 
         Menu* RootMenu() { return rootMenu.get(); }
-        void ExitAction( std::function< void(std::ostream&)> action ) { exitAction = action; }
-        void ExitAction( std::ostream& out ) { if ( exitAction ) exitAction( out ); }
+        void ExitAction( const std::function< void(std::ostream&)>& action ) { exitAction = action; }
+        void ExitAction( std::ostream& out )
+        {
+            if ( exitAction )
+                exitAction( out );
+        }
+        void StdExceptionHandler(const std::function< void(std::ostream&, const std::string& cmd, const std::exception&) >& handler)
+        {
+            exceptionHandler = handler;
+        }
+        void StdExceptionHandler(std::ostream& out, const std::string& cmd, const std::exception& e)
+        {
+            if (exceptionHandler)
+                exceptionHandler(out, cmd, e);
+            else
+                out << e.what() << '\n';
+        }
 
         static void Register(std::ostream& o) { cout().Register(o); }
         static void UnRegister(std::ostream& o) { cout().UnRegister(o); }
@@ -142,9 +170,21 @@ namespace cli
             return s;
         }
 
+        void StoreCommands(const std::vector<std::string>& cmds)
+        {
+            globalHistoryStorage->Store(cmds);
+        }
+
+        std::vector<std::string> GetCommands() const
+        {
+            return globalHistoryStorage->Commands();
+        }
+
     private:
+        std::unique_ptr<HistoryStorage> globalHistoryStorage;
         std::unique_ptr<Menu> rootMenu; // just to keep it alive
         std::function<void(std::ostream&)> exitAction;
+        std::function<void(std::ostream&, const std::string& cmd, const std::exception& )> exceptionHandler;
     };
 
     // ********************************************************************
@@ -156,8 +196,8 @@ namespace cli
         virtual ~Command() = default;
         virtual void Enable() { enabled = true; }
         virtual void Disable() { enabled = false; }
-        virtual bool Exec( const std::vector< std::string >& cmdLine, CliSession& session ) = 0;
-        virtual void Help( std::ostream& out ) const = 0;
+        virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) = 0;
+        virtual void Help(std::ostream& out) const = 0;
         // Returns the collection of completions relatives to this command.
         // For simple commands, provides a base implementation that use the name of the command
         // for aggregate commands (i.e., Menu), the function is redefined to give the menu command
@@ -180,7 +220,7 @@ namespace cli
 
     // free utility function to get completions from a list of commands and the current line
     inline std::vector<std::string> GetCompletions(
-        const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds, 
+        const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
         const std::string& currentLine)
     {
         std::vector<std::string> result;
@@ -204,7 +244,7 @@ namespace cli
     {
     public:
         CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize = 100);
-        ~CliSession() { cli.UnRegister(out); }
+        virtual ~CliSession() { cli.UnRegister(out); }
 
         // disable value semantics
         CliSession(const CliSession&) = delete;
@@ -222,8 +262,11 @@ namespace cli
 
         void Exit()
         {
-            if (exitAction) exitAction(out);
+            exitAction(out);
             cli.ExitAction(out);
+
+            auto cmds = history.GetCommands();
+            cli.StoreCommands(cmds);
         }
 
         void ExitAction(const std::function<void(std::ostream&)>& action)
@@ -251,7 +294,7 @@ namespace cli
         Menu* current;
         std::unique_ptr<Menu> globalScopeMenu;
         std::ostream& out;
-        std::function< void(std::ostream&)> exitAction;
+        std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
         detail::History history;
     };
 
@@ -276,7 +319,7 @@ namespace cli
                 cmd(c), cmds(v)
             {}
             void Enable()
-            { 
+            {
                 if (auto c = cmd.lock())
                     c->Enable();
             }
@@ -317,31 +360,31 @@ namespace cli
 
         Menu() : Command({}), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
 
-        Menu( const std::string& _name, const std::string& desc = "(menu)" ) :
+        Menu(const std::string& _name, const std::string& desc = "(menu)") :
             Command(_name), parent(nullptr), description(desc), cmds(std::make_shared<Cmds>())
         {}
 
         template <typename F>
-        CmdHandler Insert(const std::string& name, F f, const std::string& help = "", const std::vector<std::string>& parDesc={})
+        CmdHandler Insert(const std::string& cmdName, F f, const std::string& help = "", const std::vector<std::string>& parDesc={})
         {
             // dispatch to private Insert methods
-            return Insert(name, help, parDesc, f, &F::operator());
+            return Insert(cmdName, help, parDesc, f, &F::operator());
         }
 
         template <typename F>
-        CmdHandler Insert(const std::string& name, const std::vector<std::string>& parDesc, F f, const std::string& help = "")
+        CmdHandler Insert(const std::string& cmdName, const std::vector<std::string>& parDesc, F f, const std::string& help = "")
         {
             // dispatch to private Insert methods
-            return Insert(name, help, parDesc, f, &F::operator());
+            return Insert(cmdName, help, parDesc, f, &F::operator());
         }
 
 #ifdef CLI_DEPRECATED_API
         template <typename F>
         [[deprecated("Use the method Insert instead")]]
-        void Add(const std::string& name, F f, const std::string& help = "")
+        void Add(const std::string& cmdName, F f, const std::string& help = "")
         {
             // dispatch to private Add methods
-            Add(name, help, f, &F::operator());
+            Add(cmdName, help, f, &F::operator());
         }
 
         [[deprecated("Use the method Insert instead")]]
@@ -359,7 +402,7 @@ namespace cli
             cmds->push_back(s);
         }
 #endif // CLI_DEPRECATED_API
-        
+
         CmdHandler Insert(std::unique_ptr<Command>&& cmd)
         {
             std::shared_ptr<Command> scmd(std::move(cmd));
@@ -379,12 +422,13 @@ namespace cli
 
         bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) override
         {
-            if (!IsEnabled()) return false;
-            if ( cmdLine[ 0 ] == Name() )
+            if (!IsEnabled())
+                return false;
+            if (cmdLine[0] == Name())
             {
-                if ( cmdLine.size() == 1 )
+                if (cmdLine.size() == 1)
                 {
-                    session.Current( this );
+                    session.Current(this);
                     return true;
                 }
                 else
@@ -426,6 +470,10 @@ namespace cli
             out << " - " << Name() << "\n\t" << description << "\n";
         }
 
+        // returns:
+        // - the completions of this menu command
+        // - the recursive completions of subcommands
+        // - the recursive completions of parent menu
         std::vector<std::string> GetCompletions(const std::string& currentLine) const
         {
             auto result = cli::GetCompletions(cmds, currentLine);
@@ -437,6 +485,9 @@ namespace cli
             return result;
         }
 
+        // returns:
+        // - the completion of this menu command
+        // - the recursive completions of the subcommands
         virtual std::vector<std::string> GetCompletionRecursive(const std::string& line) const override
         {
             if (line.rfind(Name(), 0) == 0) // line starts_with Name()
@@ -478,6 +529,12 @@ namespace cli
 
         template <typename F, typename R, typename ... Args>
         CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const);
+
+        template <typename F, typename R>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>&) const);
+
+        template <typename F, typename R>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string>) const);
 
         Menu* parent;
         const std::string description;
@@ -547,10 +604,10 @@ namespace cli
             {
                 try
                 {
-                    T arg = boost::lexical_cast<T>( cmdLine[ 1 ] );
+                    T arg = detail::from_string<T>( cmdLine[ 1 ] );
                     function( arg, session.OutStream() );
                 }
-                catch ( boost::bad_lexical_cast & )
+                catch (std::bad_cast&)
                 {
                     return false;
                 }
@@ -592,11 +649,11 @@ namespace cli
             {
                 try
                 {
-                    T1 arg1 = boost::lexical_cast<T1>( cmdLine[ 1 ] );
-                    T2 arg2 = boost::lexical_cast<T2>( cmdLine[ 2 ] );
+                    T1 arg1 = detail::from_string<T1>( cmdLine[ 1 ] );
+                    T2 arg2 = detail::from_string<T2>( cmdLine[ 2 ] );
                     function( arg1, arg2, session.OutStream() );
                 }
-                catch ( boost::bad_lexical_cast & )
+                catch (std::bad_cast&)
                 {
                     return false;
                 }
@@ -639,12 +696,12 @@ namespace cli
             {
                 try
                 {
-                    T1 arg1 = boost::lexical_cast<T1>( cmdLine[ 1 ] );
-                    T2 arg2 = boost::lexical_cast<T2>( cmdLine[ 2 ] );
-                    T3 arg3 = boost::lexical_cast<T3>( cmdLine[ 3 ] );
+                    T1 arg1 = detail::from_string<T1>( cmdLine[ 1 ] );
+                    T2 arg2 = detail::from_string<T2>( cmdLine[ 2 ] );
+                    T3 arg3 = detail::from_string<T3>( cmdLine[ 3 ] );
                     function( arg1, arg2, arg3, session.OutStream() );
                 }
-                catch ( boost::bad_lexical_cast & )
+                catch (std::bad_cast&)
                 {
                     return false;
                 }
@@ -688,13 +745,13 @@ namespace cli
             {
                 try
                 {
-                    T1 arg1 = boost::lexical_cast<T1>( cmdLine[ 1 ] );
-                    T2 arg2 = boost::lexical_cast<T2>( cmdLine[ 2 ] );
-                    T3 arg3 = boost::lexical_cast<T3>( cmdLine[ 3 ] );
-                    T4 arg4 = boost::lexical_cast<T4>( cmdLine[ 4 ] );
+                    T1 arg1 = detail::from_string<T1>( cmdLine[ 1 ] );
+                    T2 arg2 = detail::from_string<T2>( cmdLine[ 2 ] );
+                    T3 arg3 = detail::from_string<T3>( cmdLine[ 3 ] );
+                    T4 arg4 = detail::from_string<T4>( cmdLine[ 4 ] );
                     function( arg1, arg2, arg3, arg4, session.OutStream() );
                 }
-                catch ( boost::bad_lexical_cast & )
+                catch (std::bad_cast&)
                 {
                     return false;
                 }
@@ -732,7 +789,7 @@ namespace cli
         {
             assert( first != last );
             assert( std::distance(first, last) == 1+sizeof...(Args) );
-            const P p = boost::lexical_cast<typename std::decay<P>::type>(*first);
+            const P p = detail::from_string<typename std::decay<P>::type>(*first);
             auto g = [&](auto ... pars){ f(p, pars...); };
             Select<decltype(g), Args...>::Exec(g, std::next(first), last);
         }
@@ -781,8 +838,8 @@ namespace cli
         VariadicFunctionCommand(
             const std::string& _name,
             F fun,
-            const std::string& desc = "unknown command",
-            const std::vector<std::string>& parDesc = {}
+            const std::string& desc,
+            const std::vector<std::string>& parDesc
         )
             : Command(_name), func(std::move(fun)), description(desc), parameterDesc(parDesc)
         {
@@ -800,10 +857,59 @@ namespace cli
                     auto g = [&](auto ... pars){ func( session.OutStream(), pars... ); };
                     Select<decltype(g), Args...>::Exec(g, std::next(cmdLine.begin()), cmdLine.end());
                 }
-                catch (boost::bad_lexical_cast &)
+                catch (std::bad_cast&)
                 {
                     return false;
                 }
+                return true;
+            }
+            return false;
+        }
+
+        void Help(std::ostream& out) const override
+        {
+            if (!IsEnabled()) return;
+            out << " - " << Name();
+            if (parameterDesc.empty())
+                PrintDesc<Args...>::Dump(out);
+            for (auto& s: parameterDesc)
+                out << " <" << s << '>';
+            out << "\n\t" << description << "\n";
+        }
+
+    private:
+
+        const F func;
+        const std::string description;
+        const std::vector<std::string> parameterDesc;
+    };
+
+
+    template <typename F>
+    class FreeformCommand : public Command
+    {
+    public:
+        // disable value semantics
+        FreeformCommand(const FreeformCommand&) = delete;
+        FreeformCommand& operator = (const FreeformCommand&) = delete;
+
+        FreeformCommand(
+            const std::string& _name,
+            F fun,
+            const std::string& desc = "unknown command",
+            const std::vector<std::string>& parDesc = {}
+        )
+            : Command(_name), func(std::move(fun)), description(desc), parameterDesc(parDesc)
+        {
+        }
+
+        bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
+        {
+            if (!IsEnabled()) return false;
+            assert(!cmdLine.empty());
+            if (Name() == cmdLine[0])
+            {
+                func(session.OutStream(), std::vector<std::string>(std::next(cmdLine.begin()), cmdLine.end()));
                 return true;
             }
             return false;
@@ -812,8 +918,6 @@ namespace cli
         {
             if (!IsEnabled()) return;
             out << " - " << Name();
-            if (parameterDesc.empty())
-                PrintDesc<Args...>::Dump(out);
             for (auto& s: parameterDesc)
                 out << " <" << s << '>';
             out << "\n\t" << description << "\n";
@@ -838,6 +942,8 @@ namespace cli
             out(_out),
             history(historySize)
         {
+            history.LoadCommands(cli.GetCommands());
+
             cli.Register(out);
             globalScopeMenu->Insert(
                 "help",
@@ -864,15 +970,30 @@ namespace cli
         detail::split(strs, cmd);
         if (strs.empty()) return; // just hit enter
 
-        // global cmds check
-        bool found = globalScopeMenu->ScanCmds(strs, *this);
-
-        // root menu recursive cmds check
-        if (!found) found = current -> ScanCmds(std::move(strs), *this); // last use of strs
-
         history.NewCommand(cmd); // add anyway to history
-        if (!found) // error msg if not found
-            out << "Command unknown: " << cmd << "\n";
+
+        try
+        {
+
+            // global cmds check
+            bool found = globalScopeMenu->ScanCmds(strs, *this);
+
+            // root menu recursive cmds check
+            if (!found) found = current->ScanCmds(std::move(strs), *this); // last use of strs
+
+            if (!found) // error msg if not found
+                out << "wrong command: " << cmd << '\n';
+        }
+        catch(const std::exception& e)
+        {
+            cli.StdExceptionHandler(out, cmd, e);
+        }
+        catch(...)
+        {
+            out << "Cli. Unknown exception caught handling command line \""
+                << cmd
+                << "\"\n";
+        }
 
         return;
     }
@@ -880,7 +1001,7 @@ namespace cli
     inline void CliSession::Prompt()
     {
         out << beforePrompt
-            << current -> Prompt()
+            << current->Prompt()
             << afterPrompt
             << "> "
             << std::flush;
@@ -900,6 +1021,12 @@ namespace cli
         auto v1 = globalScopeMenu->GetCompletions(currentLine);
         auto v3 = current->GetCompletions(currentLine);
         v1.insert(v1.end(), std::make_move_iterator(v3.begin()), std::make_move_iterator(v3.end()));
+
+        // removes duplicates (std::unique requires a sorted container)
+        std::sort(v1.begin(), v1.end());
+        auto ip = std::unique(v1.begin(), v1.end());
+        v1.resize(static_cast<std::size_t>(std::distance(v1.begin(), ip)));
+
         return v1;
     }
 
@@ -938,12 +1065,21 @@ namespace cli
 #endif // CLI_DEPRECATED_API
 
     template <typename F, typename R, typename ... Args>
-    CmdHandler Menu::Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
+    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
     {
-        auto c = std::make_shared<VariadicFunctionCommand<F, Args ...>>(name, f, help, parDesc);
-        CmdHandler cmd(c, cmds);
-        cmds->push_back(c);
-        return cmd;
+        return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
+    }
+
+    template <typename F, typename R>
+    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>& args) const )
+    {
+        return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
+    }
+
+    template <typename F, typename R>
+    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string> args) const )
+    {
+        return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
     }
 
 } // namespace

@@ -1,6 +1,6 @@
 /*******************************************************************************
  * CLI - A simple command line interface.
- * Copyright (C) 2016 Daniele Pallastrelli
+ * Copyright (C) 2020 Daniele Pallastrelli
  *
  * Boost Software License - Version 1.0 - August 17th, 2003
  *
@@ -27,32 +27,28 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_KEYBOARD_H_
-#define CLI_KEYBOARD_H_
+#ifndef CLI_HISTORYSTORAGE_H_
+#define CLI_HISTORYSTORAGE_H_
 
-#if defined(__unix__) || defined(__unix) || defined(__linux__)
-    #define OS_LINUX
-#elif defined(WIN32) || defined(_WIN32) || defined(_WIN64)
-    #define OS_WIN
-#elif defined(__APPLE__) || defined(__MACH__)
-    #define OS_MAC
-#else
-    #error "Platform not supported (yet)."
-#endif
+#include <vector>
+#include <string>
 
-#if defined(OS_LINUX) || defined(OS_MAC)
-    #include "linuxkeyboard.h"
-    namespace cli { using Keyboard = LinuxKeyboard; }
-#elif defined(OS_WIN)
-    #include "winkeyboard.h"
-    namespace cli { using Keyboard = WinKeyboard; }
-#else
-    #error "Platform not supported (yet)."
-#endif
+namespace cli
+{
 
-#undef OS_LINUX
-#undef OS_WIN
-#undef OS_MAC
+class HistoryStorage
+{
+public:
+    virtual ~HistoryStorage() = default;
+    // Store a vector of commands in the history storage
+    virtual void Store(const std::vector<std::string>& commands) = 0;
+    // Returns all the commands stored
+    virtual std::vector<std::string> Commands() const = 0;
+    // Clear the whole content of the storage
+    // After calling this method, Commands() returns the empty vector
+    virtual void Clear() = 0;
+};
 
-#endif // CLI_KEYBOARD_H_
+} // namespace cli
 
+#endif // CLI_HISTORYSTORAGE_H_

@@ -27,14 +27,16 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_TERMINAL_H_
-#define CLI_TERMINAL_H_
+#ifndef CLI_DETAIL_TERMINAL_H_
+#define CLI_DETAIL_TERMINAL_H_
 
 #include <string>
-#include "colorprofile.h"
+#include "../colorprofile.h"
 #include "inputdevice.h"
 
 namespace cli
+{
+namespace detail
 {
 
 enum class Symbol
@@ -43,7 +45,8 @@ enum class Symbol
     command,
     up,
     down,
-    tab
+    tab,
+    eof
 };
 
 class Terminal
@@ -78,18 +81,23 @@ class Terminal
     {
         switch (k.first)
         {
+            case KeyType::eof:
+                return std::make_pair(Symbol::eof, std::string{});
+                break;
             case KeyType::backspace:
             {
                 if (position == 0)
                     break;
 
                 --position;
+
+                const auto pos = static_cast<std::string::difference_type>(position);
                 // remove the char from buffer
-                currentLine.erase(currentLine.begin() + position);
+                currentLine.erase(currentLine.begin() + pos);
                 // go back to the previous char
                 out << '\b';
                 // output the rest of the line
-                out << std::string(currentLine.begin() + position, currentLine.end());
+                out << std::string(currentLine.begin() + pos, currentLine.end());
                 // remove last char
                 out << ' ';
                 // go back to the original position
@@ -134,17 +142,19 @@ class Terminal
                     return std::make_pair(Symbol::tab, std::string());
                 else
                 {
+                    const auto pos = static_cast<std::string::difference_type>(position);
+
                     // output the new char:
                     out << beforeInput << c;
                     // and the rest of the string:
-                    out << std::string(currentLine.begin() + position, currentLine.end())
+                    out << std::string(currentLine.begin() + pos, currentLine.end())
                         << afterInput;
 
                     // go back to the original position
                     out << std::string(currentLine.size() - position, '\b') << std::flush;
 
                     // update the buffer and cursor position:
-                    currentLine.insert(currentLine.begin() + position, c);
+                    currentLine.insert(currentLine.begin() + pos, c);
                     ++position;
                 }
 
@@ -155,20 +165,24 @@ class Terminal
                 if (position == currentLine.size())
                     break;
 
+                const auto pos = static_cast<std::string::difference_type>(position);
+
                 // output the rest of the line
-                out << std::string(currentLine.begin() + position + 1, currentLine.end());
+                out << std::string(currentLine.begin() + pos + 1, currentLine.end());
                 // remove last char
                 out << ' ';
                 // go back to the original position
                 out << std::string(currentLine.size() - position, '\b') << std::flush;
                 // remove the char from buffer
-                currentLine.erase(currentLine.begin() + position);
+                currentLine.erase(currentLine.begin() + pos);
                 break;
             }
             case KeyType::end:
             {
+                const auto pos = static_cast<std::string::difference_type>(position);
+
                 out << beforeInput
-                    << std::string(currentLine.begin() + position, currentLine.end())
+                    << std::string(currentLine.begin() + pos, currentLine.end())
                     << afterInput << std::flush;
                 position = currentLine.size();
                 break;
@@ -193,6 +207,7 @@ class Terminal
     std::ostream &out;
 };
 
+} // namespace detail
 } // namespace cli
 
-#endif // CLI_TERMINAL_H_
+#endif // CLI_DETAIL_TERMINAL_H_

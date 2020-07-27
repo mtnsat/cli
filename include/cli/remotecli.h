@@ -30,31 +30,31 @@
 #ifndef CLI_REMOTECLI_H_
 #define CLI_REMOTECLI_H_
 
-#include <cli/inputhandler.h>
+#include <cli/detail/inputhandler.h>
 #include <memory>
 #include "cli.h"
-#include "server.h"
-#include "inputdevice.h"
-#include "boostasio.h"
+#include "detail/server.h"
+#include "detail/inputdevice.h"
+#include "detail/boostasio.h"
 
 namespace cli
 {
 
 // *******************************************************************************
 
-class TelnetSession : public Session
+class TelnetSession : public detail::Session
 {
 public:
-    TelnetSession(boost::asio::ip::tcp::socket socket) :
-        Session(std::move(socket))
+    TelnetSession(boost::asio::ip::tcp::socket _socket) :
+        detail::Session(std::move(_socket))
     {}
 
 protected:
 
-    virtual std::string Encode(const std::string& data) const override
+    virtual std::string Encode(const std::string& _data) const override
     {
         std::string result;
-        for (char c: data)
+        for (char c: _data)
         {
             if (c == '\n') result += '\r';
             result += c;
@@ -202,9 +202,9 @@ protected:
     };
 
 
-    virtual void OnDataReceived(const std::string& data) override
+    virtual void OnDataReceived(const std::string& _data) override
     {
-        for (char c: data)
+        for (char c: _data)
             Consume(c);
     }
 
@@ -424,31 +424,31 @@ private:
     //bool waitAck = false;
 };
 
-class TelnetServer : public Server
+class TelnetServer : public detail::Server
 {
 public:
-    TelnetServer(detail::asio::BoostExecutor::ContextType& ios, short port) :
-        Server(ios, port)
+    TelnetServer(detail::asio::BoostExecutor::ContextType& ios, unsigned short port) :
+        detail::Server(ios, port)
     {}
-    virtual std::shared_ptr< Session > CreateSession(boost::asio::ip::tcp::socket socket) override
+    virtual std::shared_ptr<detail::Session> CreateSession(boost::asio::ip::tcp::socket _socket) override
     {
-        return std::make_shared<TelnetSession>(std::move(socket));
+        return std::make_shared<TelnetSession>(std::move(_socket));
     }
 };
 
 //////////////
 
-class CliTelnetSession : public InputDevice, public TelnetSession, public CliSession
+class CliTelnetSession : public detail::InputDevice, public TelnetSession, public CliSession
 {
 public:
 
-    CliTelnetSession(boost::asio::ip::tcp::socket socket, Cli& cli, std::function< void(std::ostream&)> exitAction, std::size_t historySize ) :
-        InputDevice(detail::asio::BoostExecutor(socket)),
-        TelnetSession(std::move(socket)),
-        CliSession(cli, TelnetSession::OutStream(), historySize),
+    CliTelnetSession(boost::asio::ip::tcp::socket _socket, Cli& _cli, std::function< void(std::ostream&)> _exitAction, std::size_t historySize ) :
+        InputDevice(detail::asio::BoostExecutor(_socket)),
+        TelnetSession(std::move(_socket)),
+        CliSession(_cli, TelnetSession::OutStream(), historySize),
         poll(*this, *this)
     {
-        ExitAction([this, exitAction](std::ostream& out){ exitAction(out), Disconnect(); } );
+        ExitAction([this, _exitAction](std::ostream& _out){ _exitAction(_out), Disconnect(); } );
     }
 protected:
 
@@ -460,12 +460,18 @@ protected:
 
     void Output(char c) override
     {
+        using detail::KeyType;
         switch(step)
         {
             case Step::_1:
                 switch( c )
                 {
-                    case 127: Notify(std::make_pair(KeyType::backspace,' ')); break;
+                    case EOF:
+                    case 4:  // EOT
+                        Notify(std::make_pair(KeyType::eof,' ')); break;
+                    case 8: // Backspace
+                    case 127:  // Backspace or Delete
+                        Notify(std::make_pair(KeyType::backspace, ' ')); break;
                     //case 10: Notify(std::make_pair(KeyType::ret,' ')); break;
                     case 27: step = Step::_2; break;  // symbol
                     case 13: step = Step::wait_0; break;  // wait for 0 (ENTER key)
@@ -494,13 +500,13 @@ protected:
             case Step::_3: // got 27 and 91
                 switch( c )
                 {
-                    case 51: step = Step::_4; break;  // not arrow keys
                     case 65: step = Step::_1; Notify(std::make_pair(KeyType::up,' ')); break;
                     case 66: step = Step::_1; Notify(std::make_pair(KeyType::down,' ')); break;
                     case 68: step = Step::_1; Notify(std::make_pair(KeyType::left,' ')); break;
                     case 67: step = Step::_1; Notify(std::make_pair(KeyType::right,' ')); break;
                     case 70: step = Step::_1; Notify(std::make_pair(KeyType::end,' ')); break;
                     case 72: step = Step::_1; Notify(std::make_pair(KeyType::home,' ')); break;
+                    default: step = Step::_4; break;  // not arrow keys
                 }
                 break;
 
@@ -527,20 +533,20 @@ private:
 
     enum class Step { _1, _2, _3, _4, wait_0 };
     Step step = Step::_1;
-    InputHandler poll;
+    detail::InputHandler poll;
 };
 
 
-class CliTelnetServer : public Server
+class CliTelnetServer : public detail::Server
 {
 public:
-    CliTelnetServer(detail::asio::BoostExecutor::ContextType& ios, short port, Cli& _cli, std::size_t _historySize=100 ) :
-        Server(ios, port),
+    CliTelnetServer(detail::asio::BoostExecutor::ContextType& ios, unsigned short port, Cli& _cli, std::size_t _historySize=100 ) :
+        detail::Server(ios, port),
         cli(_cli),
         historySize(_historySize)
     {}
-    CliTelnetServer(detail::asio::BoostExecutor::ContextType& ios, std::string address, short port, Cli& _cli, std::size_t _historySize=100 ) :
-        Server(ios, address, port),
+    CliTelnetServer(detail::asio::BoostExecutor::ContextType& ios, std::string address, unsigned short port, Cli& _cli, std::size_t _historySize=100 ) :
+        detail::Server(ios, address, port),
         cli(_cli),
         historySize(_historySize)
     {}
@@ -548,9 +554,9 @@ public:
     {
         exitAction = action;
     }
-    virtual std::shared_ptr<Session> CreateSession(boost::asio::ip::tcp::socket socket) override
+    virtual std::shared_ptr<detail::Session> CreateSession(boost::asio::ip::tcp::socket _socket) override
     {
-        return std::make_shared<CliTelnetSession>(std::move(socket), cli, exitAction, historySize);
+        return std::make_shared<CliTelnetSession>(std::move(_socket), cli, exitAction, historySize);
     }
 private:
     Cli& cli;

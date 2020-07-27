@@ -27,8 +27,8 @@
  * DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-#ifndef CLI_LINUXKEYBOARD_H_
-#define CLI_LINUXKEYBOARD_H_
+#ifndef CLI_DETAIL_LINUXKEYBOARD_H_
+#define CLI_DETAIL_LINUXKEYBOARD_H_
 
 #include <thread>
 #include <memory>
@@ -46,11 +46,13 @@
 
 namespace cli
 {
+namespace detail
+{
 
 class LinuxKeyboard : public InputDevice
 {
 public:
-    explicit LinuxKeyboard(detail::asio::BoostExecutor ex) :
+    explicit LinuxKeyboard(asio::BoostExecutor ex) :
         InputDevice(ex)
     {
         ToManualMode();
@@ -80,6 +82,10 @@ private:
         int ch = getchar();
         switch( ch )
         {
+            case EOF:
+            case 4:  // EOT
+                return std::make_pair(KeyType::eof,' ');
+                break;
             case 127: return std::make_pair(KeyType::backspace,' '); break;
             case 10: return std::make_pair(KeyType::ret,' '); break;
             case 27: // symbol
@@ -100,6 +106,7 @@ private:
                         case 67: return std::make_pair(KeyType::right,' ');
                         case 70: return std::make_pair(KeyType::end,' ');
                         case 72: return std::make_pair(KeyType::home,' ');
+                        default: return std::make_pair(KeyType::ignored,' ');
                     }
                 }
                 break;
@@ -116,7 +123,7 @@ private:
     {
         tcgetattr( STDIN_FILENO, &oldt );
         newt = oldt;
-        newt.c_lflag &= ~( ICANON | ECHO );
+        newt.c_lflag &= ~( (tcflag_t)ICANON | (tcflag_t)ECHO );
         tcsetattr( STDIN_FILENO, TCSANOW, &newt );
     }
     void ToStandardMode()
@@ -145,7 +152,8 @@ private:
     std::unique_ptr<std::thread> servant;
 };
 
-} // namespace
+} // namespace detail
+} // namespace cli
 
-#endif // CLI_LINUXKEYBOARD_H_
+#endif // CLI_DETAIL_LINUXKEYBOARD_H_
 

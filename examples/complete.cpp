@@ -29,10 +29,13 @@
 
 #include <cli/clilocalsession.h> // include boost asio
 #include <cli/remotecli.h>
-// TODO. NB: remotecli.h and clilocalsession.h both includes boost asio, 
+// TODO. NB: remotecli.h and clilocalsession.h both includes boost asio,
 // so in Windows it should appear before cli.h that include rang
 // (consider to provide a global header file for the library)
 #include <cli/cli.h>
+#include <cli/filehistorystorage.h>
+
+#define ENABLE_TELNET_SERVER
 
 using namespace cli;
 using namespace std;
@@ -70,6 +73,27 @@ int main()
             },
             "Print the file descriptor specified",
             {"file_descriptor"} );
+    rootMenu -> Insert(
+            "echo", {"string to echo"},
+            [](std::ostream& out, const string& arg)
+            {
+                out << arg << "\n";
+            },
+            "Print the string passed as parameter" );
+    rootMenu -> Insert(
+            "echo", {"first string to echo", "second string to echo"},
+            [](std::ostream& out, const string& arg1, const string& arg2)
+            {
+                out << arg1 << ' ' << arg2 << "\n";
+            },
+            "Print the strings passed as parameter" );
+    rootMenu -> Insert(
+            "error",
+            [](std::ostream&)
+            {
+                throw std::logic_error("Error in cmd");
+            },
+            "Throw an exception in the command handler" );
     rootMenu -> Insert(
             "reverse", {"string_to_revert"},
             [](std::ostream& out, const string& arg)
@@ -110,7 +134,7 @@ int main()
                 out << "Colors OFF\n";
                 SetNoColor();
                 colorCmd.Enable();
-                nocolorCmd.Disable();                
+                nocolorCmd.Disable();
             },
             "Disable colors in the cli" );
     rootMenu->Insert(
@@ -141,10 +165,24 @@ int main()
 
     rootMenu -> Insert( std::move(subMenu) );
 
-
-    Cli cli( std::move(rootMenu) );
+    // create a cli with the given root menu and a persistent storage
+    // you must pass to FileHistoryStorage the path of the history file
+    // if you don't pass the second argument, the cli will use a VolatileHistoryStorage object that keeps in memory
+    // the history of all the sessions, until the cli is shut down.
+    Cli cli( std::move(rootMenu), std::make_unique<FileHistoryStorage>(".cli") );
     // global exit action
     cli.ExitAction( [](auto& out){ out << "Goodbye and thanks for all the fish.\n"; } );
+    // std exception custom handler
+    cli.StdExceptionHandler(
+        [](std::ostream& out, const std::string& cmd, const std::exception& e)
+        {
+            out << "Exception caught in cli handler: "
+                << e.what()
+                << " handling command: "
+                << cmd
+                << ".\n";
+        }
+    );
 
     CliLocalTerminalSession localSession(cli, ios, std::cout, 200);
     localSession.ExitAction(
@@ -157,9 +195,22 @@ int main()
 
     // setup server
 
+#ifdef ENABLE_TELNET_SERVER
+
     CliTelnetServer server(ios, 5000, cli);
     // exit action for all the connections
     server.ExitAction( [](auto& out) { out << "Terminating this session...\n"; } );
+
+#else // ENABLE_TELNET_SERVER
+
+#if BOOST_VERSION < 106600
+    boost::asio::io_service::work work(ios);
+#else
+        auto work = boost::asio::make_work_guard(ios);
+#endif  
+
+#endif // ENABLE_TELNET_SERVER
+
     ios.run();
 
     return 0;
